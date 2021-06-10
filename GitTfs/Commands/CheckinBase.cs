@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using NDesk.Options;
 using Sep.Git.Tfs.Core;
@@ -52,9 +51,12 @@ namespace Sep.Git.Tfs.Commands
                 if (refToCheckin == "HEAD")
                     parentChangeset.Remote.Repository.CommandNoisy("merge", parentChangeset.Remote.MaxCommitHash);
             }
+  <<<<<<< alternate-cleanup-implementations
 
             parentChangeset.Remote.CleanupWorkspaceDirectory();
 
+  =======
+  >>>>>>> debug_slow_commit
             return GitTfsExitCodes.OK;
         }
 

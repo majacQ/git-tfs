@@ -107,8 +107,11 @@ namespace Sep.Git.Tfs.Commands
 
             remote.Fetch();
 
+  <<<<<<< alternate-cleanup-implementations
             remote.CleanupWorkspaceDirectory();
 
+  =======
+  >>>>>>> debug_slow_commit
             if(remote.Repository.IsBare)
                 remote.Repository.UpdateRef(GitRepository.ShortToLocalName(BareBranch), remote.MaxCommitHash);
         }
