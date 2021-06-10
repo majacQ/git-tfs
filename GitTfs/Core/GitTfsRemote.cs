@@ -155,11 +155,38 @@ namespace Sep.Git.Tfs.Core
 
         public void CleanupWorkspace()
         {
+  <<<<<<< alternate-cleanup-implementations
+            Trace.WriteLine("Removing TFS workspaces mappings for " + WorkingDirectory);
+            Tfs.CleanupWorkspaces(WorkingDirectory);
+  =======
             //Tfs.CleanupWorkspaces(WorkingDirectory);
+  >>>>>>> debug_slow_commit
         }
 
         public void CleanupWorkspaceDirectory()
         {
+  <<<<<<< alternate-cleanup-implementations
+            Trace.WriteLine("Removing local workspace directory " + WorkingDirectory);
+            try
+            {
+                Directory.Delete(WorkingDirectory, true);
+            }
+            catch (Exception e)
+            {
+                try
+                {
+                    var allFiles = Directory.EnumerateFiles(WorkingDirectory, "*", SearchOption.AllDirectories);
+                    foreach (var file in allFiles)
+                        File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
+
+                    Directory.Delete(WorkingDirectory, true);
+                }
+                catch (Exception ex)
+                {
+                    Trace.WriteLine(ex.Message);
+                }
+            }
+ =======
             //try
             //{
             //    var allFiles = Directory.EnumerateFiles(WorkingDirectory, "*", SearchOption.AllDirectories);
@@ -172,6 +199,7 @@ namespace Sep.Git.Tfs.Core
             //{
             //    Trace.WriteLine(ex.Message);
             //}
+ >>>>>>> debug_slow_commit
         }
 
         public bool ShouldSkip(string path)

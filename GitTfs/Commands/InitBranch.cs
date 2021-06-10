@@ -225,6 +225,11 @@ namespace Sep.Git.Tfs.Commands
             else
                 Trace.WriteLine("Local branch created!");
 
+  <<<<<<< alternate-cleanup-implementations
+            tfsRemote.CleanupWorkspaceDirectory();
+
+  =======
+  >>>>>>> debug_slow_commit
             return GitTfsExitCodes.OK;
         }
 
