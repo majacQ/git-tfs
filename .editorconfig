@@ -3,15 +3,30 @@
 ; Top-most EditorConfig file
 root = true
 
-; Windows-style newlines
 [*]
-end_of_line = CRLF
+; Windows-style newlines - Commented out as we are normalizing the line endings
+; for all text files via the .gitattribute setting.
+; Specifying it here (and especially hardcoding it to a specific value)
+; causes trouble for systems where core.eol = LF  (or on a Linux system, where the
+; native line ending is LF as well, as then the .editorconfig and .git have a different
+; idea about the correct line ending). Instead, assume that the user has a sane
+; editor which will not convert the line ending of the files on a whim and rely on
+; the .gitattribues to always use LF on checked in files.
+; end_of_line = CRLF
 
 ; 4-column space indentation
 [*.cs]
 indent_style = space
 indent_size = 4
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = true
 
 [*.cake]
 indent_style = tab
 indent_size = 4
+
+[*.md]
+# Ensure that the markdown files always end with a newline, which is e.g. especially
+# helpful for the docs/release/NEXT.md to ensure that adding a new entry/line
+# doesn't touch the previous one to reduce the diff & merge conflicts.
+insert_final_newline = true

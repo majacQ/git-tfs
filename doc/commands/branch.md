@@ -18,12 +18,12 @@ The `branch` command allows you to manage TFS branches. With this command, you c
 		   * Delete a remote branch:
 		   git tfs branch --delete tfsRemoteName
 		   git tfs branch --delete --all
+		   git tfs branch --delete --delete-remotes-file=remotes.txt
 
 		   * Initialise an existing remote TFS branch:
 		   git tfs branch --init $/Repository/ProjectBranch
 		   git tfs branch --init $/Repository/ProjectBranch myNewBranch
 		   git tfs branch --init --all
-		   git tfs branch --init --tfs-parent-branch=$/Repository/ProjectParentBranch $/Repository/ProjectBranch
 
 	  -h, -H, --help
 	  -V, --version
@@ -43,14 +43,11 @@ The `branch` command allows you to manage TFS branches. With this command, you c
 		  --comment=VALUE        Comment used for the creation of the TFS branch
 	  -m, --move                 Rename a TFS remote
 		  --delete               Delete a TFS remote
+		  --delete-remotes-file=VALUE File with a list of remotes to delete
 		  --init                 Initialize an existing TFS branch
           --ignore-regex=VALUE   a regex of files to ignore
           --except-regex=VALUE   a regex of exceptions to ignore-regex
 		  --no-fetch              Don't fetch changeset for inited branch(es)
-	  -b, --tfs-parent-branch=VALUE
-								 TFS Parent branch of the TFS branch to clone
-								   (TFS 2008 only! And required!!) ex:
-								   $/Repository/ProjectParentBranch
 	  -u, --username=VALUE       TFS username
 	  -p, --password=VALUE       TFS password
 	  -a, --authors=VALUE        Path to an Authors file to map TFS users to Git
@@ -123,12 +120,6 @@ Note: To successfully process the merge changeset (and come from an older versio
 
 This command will initialize all the branches that haven't yet been initialized.
 
-### Initialize a branch with TFS2008
-
-TFS2008 doesn't provide the ability for git-tfs to programmatically determine the parent of a branch. You must find it yourself within the TFS UI. You can check the checkin message or ask whomever originally made the branch. Once you determine the parent branch, provide it using the parameter `--tfs-parent-branch`. 
-
-    git tfs branch --init --tfs-parent-branch=$/Repository/ProjectParentBranch $/Repository/ProjectBranch
-
 ### Ignore files when fetching changesets
 
 You can use the parameter `--ignore-regex`, to ignore some files when fetching the changesets of the branch.
@@ -145,7 +136,7 @@ You can use the parameter `--no-fetch`, to initialize the branch by creating its
 
 ### Authentication
 
-For the use of parameters `--username` and `--password`, see the [clone](clone.md) command.
+For the use of parameters `--username` and `--password` or authenticate using a PAT, see the [clone](clone.md) command.
 
 ### Map TFS users to git users
 
@@ -163,6 +154,10 @@ Note : This will not rename the TFS branch, just the local git remote.
 Note : This will not delete the TFS branch, just the local git remote.
 
     git tfs branch --delete tfsRemoteName
+
+Or delete all remotes listed in a file (one remote per line).
+
+	git tfs branch --delete --delete-remotes-file=remotes.txt
 
 ## See also
 

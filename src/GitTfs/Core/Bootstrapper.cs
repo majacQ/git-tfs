@@ -26,7 +26,7 @@ namespace GitTfs.Core
                     Url = changeset.Remote.TfsUrl,
                     Repository = changeset.Remote.TfsRepositoryPath,
                     RemoteOptions = _remoteOptions,
-                }, string.Empty);
+                });
                 remote.UpdateTfsHead(changeset.GitCommit, changeset.ChangesetId);
                 Trace.TraceInformation("-> new remote '" + remote.Id + "'");
             }
@@ -68,9 +68,6 @@ namespace GitTfs.Core
             return remoteId;
         }
 
-        private bool IsAvailable(string remoteName)
-        {
-            return !_globals.Repository.HasRemote(remoteName);
-        }
+        private bool IsAvailable(string remoteName) => !_globals.Repository.HasRemote(remoteName);
     }
 }

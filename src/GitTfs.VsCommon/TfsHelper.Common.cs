@@ -1,11 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
+﻿using System.Diagnostics;
 using System.Net;
 using System.Reflection;
-using Microsoft.TeamFoundation;
 using Microsoft.TeamFoundation.Client;
 using Microsoft.TeamFoundation.VersionControl.Client;
 using Microsoft.TeamFoundation.WorkItemTracking.Client;
@@ -29,11 +24,14 @@ namespace GitTfs.VsCommon
         private readonly IContainer _container;
         protected TfsTeamProjectCollection _server;
         private static bool _resolverInstalled;
+        private AuthorsFile _authorsFile;
+        private Uri _lastAuthenticatedUri;
 
         public TfsHelperBase(TfsApiBridge bridge, IContainer container)
         {
             _bridge = bridge;
             _container = container;
+            _authorsFile = _container.GetInstance<AuthorsFile>();
             if (!_resolverInstalled)
             {
                 AppDomain.CurrentDomain.AssemblyResolve += LoadFromVsFolder;
@@ -47,7 +45,7 @@ namespace GitTfs.VsCommon
         [SetterProperty]
         public ConfigProperties properties { get; set; }
 
-        public string TfsClientLibraryVersion { get { return typeof(TfsTeamProjectCollection).Assembly.GetName().Version + " (MS)"; } }
+        public string TfsClientLibraryVersion => typeof(TfsTeamProjectCollection).Assembly.GetName().Version + " (MS)";
 
         public string Url { get; set; }
 
@@ -55,10 +53,7 @@ namespace GitTfs.VsCommon
 
         public string Password { get; set; }
 
-        public bool HasCredentials
-        {
-            get { return !string.IsNullOrEmpty(Username); }
-        }
+        public bool HasCredentials => !string.IsNullOrEmpty(Username);
 
         public void EnsureAuthenticated()
         {
@@ -83,10 +78,15 @@ namespace GitTfs.VsCommon
                 {
                     uri = new Uri(Url);
                 }
-
-                _server = GetTfsCredential(uri);
-
-                _server.EnsureAuthenticated();
+                // Only authenticate if the TFS Server Uri is different to the last authenticated Uri,
+                // avoiding useless authentication attempts on an already authenticated server.
+                // This covers only the common case that the remotes are on the same TFS server.
+                if (_lastAuthenticatedUri?.ToString() != uri.ToString())
+                {
+                    _server = GetTfsCredential(uri);
+                    _server.EnsureAuthenticated();
+                    _lastAuthenticatedUri = uri;
+                }
             }
         }
 
@@ -128,10 +128,7 @@ namespace GitTfs.VsCommon
             }
         }
 
-        private WorkItemStore WorkItems
-        {
-            get { return GetService<WorkItemStore>(); }
-        }
+        private WorkItemStore WorkItems => GetService<WorkItemStore>();
 
         private void NonFatalError(object sender, ExceptionEventArgs e)
         {
@@ -147,34 +144,16 @@ namespace GitTfs.VsCommon
             }
         }
 
-        private void Getting(object sender, GettingEventArgs e)
-        {
-            Trace.WriteLine("get [C" + e.Version + "]" + e.ServerItem);
-        }
+        private void Getting(object sender, GettingEventArgs e) => Trace.WriteLine("get [C" + e.Version + "]" + e.ServerItem);
 
-        private ILinking _linking;
-        private ILinking Linking
-        {
-            get { return _linking ?? (_linking = GetService<ILinking>()); }
-        }
+        private TswaClientHyperlinkService _hyperLinkService;
 
-        public int BatchCount
-        {
-            get
-            {
-                return properties.BatchSize;
-            }
-        }
+        private TswaClientHyperlinkService HyperlinkService => _hyperLinkService ?? (_hyperLinkService = GetService<TswaClientHyperlinkService>());
+
+        public int BatchCount => properties.BatchSize;
 
         public IEnumerable<ITfsChangeset> GetChangesets(string path, int startVersion, IGitTfsRemote remote, int lastVersion = -1, bool byLots = false)
         {
-            if (Is2008OrOlder)
-            {
-                foreach (var changeset in GetChangesetsForTfs2008(path, startVersion, remote))
-                    yield return changeset;
-                yield break;
-            }
-
             var start = startVersion;
             Changeset[] changesets;
             var lastChangeset = lastVersion == -1 ? VersionSpec.Latest : new ChangesetVersionSpec(lastVersion);
@@ -195,21 +174,6 @@ namespace GitTfs.VsCommon
                     changesets[i] = null;
                 }
             } while (!byLots && changesets.Length == BatchCount);
-        }
-
-        public IEnumerable<ITfsChangeset> GetChangesetsForTfs2008(string path, int startVersion, IGitTfsRemote remote)
-        {
-            var changesets = VersionControl.QueryHistory(path, VersionSpec.Latest, 0, RecursionType.Full,
-                                                                        null, new ChangesetVersionSpec(startVersion), VersionSpec.Latest, int.MaxValue,
-                                                                        true, true, true)
-                                                          .Cast<Changeset>().OrderBy(changeset => changeset.ChangesetId).ToArray();
-            // don't take the enumerator produced by a foreach statement or a yield statement, as there are references
-            // to the old (iterated) elements and thus the referenced changesets won't be disposed until all elements were iterated.
-            for (int i = 0; i < changesets.Length; i++)
-            {
-                yield return BuildTfsChangeset(changesets[i], remote);
-                changesets[i] = null;
-            }
         }
 
         public virtual int FindMergeChangesetParent(string path, int targetChangeset, GitTfsRemote remote)
@@ -237,22 +201,9 @@ namespace GitTfs.VsCommon
             });
         }
 
-        public bool Is2008OrOlder
-        {
-            get { return _server.ConfigurationServer == null; }
-        }
-
-        public bool CanGetBranchInformation
-        {
-            get { return !Is2008OrOlder; }
-        }
-
-        public IEnumerable<string> GetAllTfsRootBranchesOrderedByCreation()
-        {
-            return AllTfsBranchObjects
+        public IEnumerable<string> GetAllTfsRootBranchesOrderedByCreation() => AllTfsBranchObjects
                 .Where(b => b.Properties.ParentBranch == null)
                 .Select(b => b.Properties.RootItem.Item);
-        }
 
         public IEnumerable<IBranchObject> GetBranches(bool getAlsoDeletedBranches = false)
         {
@@ -277,177 +228,107 @@ namespace GitTfs.VsCommon
             if (lastChangesetIdToCheck == -1)
                 lastChangesetIdToCheck = int.MaxValue;
 
+            if (!string.IsNullOrWhiteSpace(tfsPathParentBranch))
+                Trace.WriteLine("Parameter about parent branch will be ignored because this version of TFS is able to find the parent!");
+
+            Trace.WriteLine("Looking to find branch '" + tfsPathBranchToCreate + "' in all TFS branches...");
+            string tfsParentBranch;
+            if (!AllTfsBranches.TryGetValue(tfsPathBranchToCreate, out tfsParentBranch))
+            {
+                throw new GitTfsException("error: TFS branches " + tfsPathBranchToCreate + " not found!");
+            }
+
+            if (tfsParentBranch == null)
+            {
+                Trace.WriteLine("There is no parent branch for " + tfsPathBranchToCreate + ". Ignoring.");
+                return;
+            }
+
+            tfsPathParentBranch = tfsParentBranch;
+            Trace.WriteLine("Found parent branch : " + tfsPathParentBranch);
+
+
             try
             {
-                if (!CanGetBranchInformation)
+                // This method now handles the scenario where a valid branch has been detected for migration but its
+                // root/branch changeset is *not* the first changeset in its history.
+                //
+                // This situation can occur when:
+                //
+                //  1) My project is created (e.g. $/MyProject/MyTrunk) (C1)
+                //  2) Work is done on $/MyProject/MyTrunk (C2)
+                //  3) A folder is created based on the contents of $/MyProject/MyTrunk without branching (e.g. $/MyProject/MyFeature) (C3)
+                //  4) Folder $/MyProject/MyFeature is deleted (C4)
+                //  5) Branch $/MyProject/MyFeature is created from $/MyProject/MyTrunk (C5)
+                //
+                // In this case, the code previously assumed C3 is the root changeset and would only check for merge history in it.
+                // Now, the code does not assume any given changeset is the branch root and instead crawls its history in
+                // batches to find the first changeset with merge history and assumes that changeset is the root.
+
+                const int batchSize = 100;
+
+                IEnumerable<MergeInfo> branchChangesetInTargetBranch = null;
+                for (var batchNumber = 1; branchChangesetInTargetBranch == null; batchNumber++)
                 {
-                    Trace.WriteLine("Try TFS2008 compatibility mode...");
-                    foreach (var rootBranch in GetRootChangesetForBranchForTfs2008(tfsPathBranchToCreate, lastChangesetIdToCheck, tfsPathParentBranch))
+                    var changesetsToRetrieve = batchNumber * batchSize;
+
+                    var changesetEnumerable = VersionControl.QueryHistory(tfsPathBranchToCreate, VersionSpec.Latest, 0,
+                        RecursionType.Full, null, null, null, changesetsToRetrieve, false, false, false, true).Cast<Changeset>();
+
+                    if (batchNumber > 1)
                     {
-                        AddNewRootBranch(rootBranches, rootBranch);
+                        changesetEnumerable = changesetEnumerable.Skip((batchNumber - 1) * batchSize).Take(batchSize);
                     }
-                    return;
-                }
 
-                if (!string.IsNullOrWhiteSpace(tfsPathParentBranch))
-                    Trace.WriteLine("Parameter about parent branch will be ignored because this version of TFS is able to find the parent!");
+                    // ToList'ed because inspecting the enumerable during debugging was resulting in TFS timeouts
+                    var changesets = changesetEnumerable.ToList();
 
-                Trace.WriteLine("Looking to find branch '" + tfsPathBranchToCreate + "' in all TFS branches...");
-                string tfsParentBranch;
-                if (!AllTfsBranches.TryGetValue(tfsPathBranchToCreate, out tfsParentBranch))
-                {
-                    throw new GitTfsException("error: TFS branches " + tfsPathBranchToCreate + " not found!");
-                }
-
-                if (tfsParentBranch == null)
-                {
-                    Trace.WriteLine("There is no parent branch for " + tfsPathBranchToCreate + ". Ignoring.");
-                    return;
-                }
-
-                tfsPathParentBranch = tfsParentBranch;
-                Trace.WriteLine("Found parent branch : " + tfsPathParentBranch);
-
-
-                try
-                {
-                    // This method now handles the scenario where a valid branch has been detected for migration but its
-                    // root/branch changeset is *not* the first changeset in its history.
-                    //
-                    // This situation can occur when:
-                    //
-                    //  1) My project is created (e.g. $/MyProject/MyTrunk) (C1)
-                    //  2) Work is done on $/MyProject/MyTrunk (C2)
-                    //  3) A folder is created based on the contents of $/MyProject/MyTrunk without branching (e.g. $/MyProject/MyFeature) (C3)
-                    //  4) Folder $/MyProject/MyFeature is deleted (C4)
-                    //  5) Branch $/MyProject/MyFeature is created from $/MyProject/MyTrunk (C5)
-                    //
-                    // In this case, the code previously assumed C3 is the root changeset and would only check for merge history in it.
-                    // Now, the code does not assume any given changeset is the branch root and instead crawls its history in
-                    // batches to find the first changeset with merge history and assumes that changeset is the root.
-
-                    const int batchSize = 100;
-
-                    IEnumerable<MergeInfo> branchChangesetInTargetBranch = null;
-                    for (var batchNumber = 1; branchChangesetInTargetBranch == null; batchNumber++)
+                    // If our batch has no results, there's nothing left to check; we're done.
+                    if (!changesets.Any())
                     {
-                        var changesetsToRetrieve = batchNumber * batchSize;
+                        break;
+                    }
 
-                        var changesetEnumerable = VersionControl.QueryHistory(tfsPathBranchToCreate, VersionSpec.Latest, 0,
-                            RecursionType.Full, null, null, null, changesetsToRetrieve, false, false, false, true).Cast<Changeset>();
+                    foreach (var changeset in changesets)
+                    {
+                        var branchChangesetsInTargetBranchForBatch = GetMergeInfo(tfsPathBranchToCreate, tfsPathParentBranch, changeset.ChangesetId, lastChangesetIdToCheck);
 
-                        if (batchNumber > 1)
+                        if (branchChangesetsInTargetBranchForBatch.Any())
                         {
-                            changesetEnumerable = changesetEnumerable.Skip((batchNumber - 1) * batchSize).Take(batchSize);
-                        }
-
-                        // ToList'ed because inspecting the enumerable during debugging was resulting in TFS timeouts
-                        var changesets = changesetEnumerable.ToList();
-
-                        // If our batch has no results, there's nothing left to check; we're done.
-                        if (!changesets.Any())
-                        {
+                            branchChangesetInTargetBranch = branchChangesetsInTargetBranchForBatch;
                             break;
                         }
-
-                        foreach (var changeset in changesets)
-                        {
-                            var branchChangesetsInTargetBranchForBatch = GetMergeInfo(tfsPathBranchToCreate, tfsPathParentBranch, changeset.ChangesetId, lastChangesetIdToCheck);
-
-                            if (branchChangesetsInTargetBranchForBatch.Any())
-                            {
-                                branchChangesetInTargetBranch = branchChangesetsInTargetBranchForBatch;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (branchChangesetInTargetBranch == null)
-                    {
-                        throw new GitTfsException("An unexpected error occurred when trying to find the root changeset.\nFailed to find first changeset for " + tfsPathBranchToCreate);
-                    }
-
-                    string renameFromBranch;
-                    var rootChangesetInParentBranch =
-                        GetRelevantChangesetBasedOnChangeType(branchChangesetInTargetBranch, tfsPathParentBranch, tfsPathBranchToCreate, out renameFromBranch);
-
-                    var rootChangesetMergeInfo = branchChangesetInTargetBranch.First();
-
-                    // If the merge info indicates our parent branch root changeset is the source, then our child changeset
-                    // will be the target. Otherwise, they're swapped.
-                    var rootChangesetInChildBranch = rootChangesetMergeInfo.SourceChangeset == rootChangesetInParentBranch ?
-                        rootChangesetMergeInfo.TargetChangeset : rootChangesetMergeInfo.SourceChangeset;
-
-                    var rootBranch = new RootBranch(rootChangesetInParentBranch, rootChangesetInChildBranch, tfsPathBranchToCreate);
-                    var added = AddNewRootBranch(rootBranches, rootBranch);
-
-                    if (added && renameFromBranch != null)
-                    {
-                        Trace.WriteLine("Found original branch '" + renameFromBranch + "' (renamed in branch '" + tfsPathBranchToCreate + "')");
-                        GetRootChangesetForBranch(rootBranches, renameFromBranch);
                     }
                 }
-                catch (VersionControlException)
+
+                if (branchChangesetInTargetBranch == null)
                 {
-                    throw new GitTfsException("An unexpected error occurred when trying to find the root changeset.\nFailed to query history for " + tfsPathBranchToCreate);
+                    throw new GitTfsException("An unexpected error occurred when trying to find the root changeset.\nFailed to find first changeset for " + tfsPathBranchToCreate);
+                }
+
+                string renameFromBranch;
+                var rootChangesetInParentBranch =
+                    GetRelevantChangesetBasedOnChangeType(branchChangesetInTargetBranch, tfsPathParentBranch, tfsPathBranchToCreate, out renameFromBranch);
+
+                var rootChangesetMergeInfo = branchChangesetInTargetBranch.First();
+
+                // If the merge info indicates our parent branch root changeset is the source, then our child changeset
+                // will be the target. Otherwise, they're swapped.
+                var rootChangesetInChildBranch = rootChangesetMergeInfo.SourceChangeset == rootChangesetInParentBranch ?
+                    rootChangesetMergeInfo.TargetChangeset : rootChangesetMergeInfo.SourceChangeset;
+
+                var rootBranch = new RootBranch(rootChangesetInParentBranch, rootChangesetInChildBranch, tfsPathBranchToCreate);
+                var added = AddNewRootBranch(rootBranches, rootBranch);
+
+                if (added && renameFromBranch != null)
+                {
+                    Trace.WriteLine("Found original branch '" + renameFromBranch + "' (renamed in branch '" + tfsPathBranchToCreate + "')");
+                    GetRootChangesetForBranch(rootBranches, renameFromBranch);
                 }
             }
-            catch (FeatureNotSupportedException ex)
+            catch (VersionControlException)
             {
-                Trace.WriteLine(ex.Message);
-                foreach (var rootBranch in GetRootChangesetForBranchForTfs2008(tfsPathBranchToCreate, -1, tfsPathParentBranch))
-                {
-                    AddNewRootBranch(rootBranches, rootBranch);
-                }
-            }
-        }
-
-        public IList<RootBranch> GetRootChangesetForBranchForTfs2008(string tfsPathBranchToCreate, int lastChangesetIdToCheck = -1, string tfsPathParentBranch = null)
-        {
-            Trace.WriteLine("TFS 2008 Compatible mode!");
-            int firstChangesetIdOfParentBranch = 1;
-
-            if (string.IsNullOrWhiteSpace(tfsPathParentBranch))
-                throw new GitTfsException("This version of TFS Server doesn't permit to use this command :(\nTry using option '--parent-branch'...");
-
-            if (lastChangesetIdToCheck == -1)
-                lastChangesetIdToCheck = int.MaxValue;
-
-            var changesetIdsFirstChangesetInMainBranch = VersionControl.GetMergeCandidates(tfsPathParentBranch, tfsPathBranchToCreate, RecursionType.Full)
-                .Select(c => c.Changeset.ChangesetId).Where(c => c <= lastChangesetIdToCheck).FirstOrDefault();
-
-            if (changesetIdsFirstChangesetInMainBranch == 0)
-            {
-                Trace.WriteLine("No changeset in main branch since branch done... (need only to find the last changeset in the main branch)");
-                return new List<RootBranch> { new RootBranch(VersionControl.QueryHistory(tfsPathParentBranch, VersionSpec.Latest, 0,
-                        RecursionType.Full, null, new ChangesetVersionSpec(firstChangesetIdOfParentBranch), VersionSpec.Latest,
-                        1, false, false).Cast<Changeset>().First().ChangesetId, tfsPathBranchToCreate)};
-            }
-
-            Trace.WriteLine("First changeset in the main branch after branching : " + changesetIdsFirstChangesetInMainBranch);
-
-            Trace.WriteLine("Try to find the previous changeset...");
-            int step = 100;
-            int upperBound = changesetIdsFirstChangesetInMainBranch - 1;
-            int lowerBound = Math.Max(upperBound - step, 1);
-            //for optimization, retrieve the lesser possible changesets... so 100 by 100
-            while (true)
-            {
-                Trace.WriteLine("Looking for the changeset between changeset id " + lowerBound + " and " + upperBound);
-                var firstBranchChangesetIds = VersionControl.QueryHistory(tfsPathParentBranch, VersionSpec.Latest, 0, RecursionType.Full,
-                                null, new ChangesetVersionSpec(lowerBound), new ChangesetVersionSpec(upperBound), int.MaxValue, false,
-                                false, false).Cast<Changeset>().Select(c => c.ChangesetId).ToList();
-                if (firstBranchChangesetIds.Count != 0)
-                    return new List<RootBranch> { new RootBranch(firstBranchChangesetIds.First(cId => cId < changesetIdsFirstChangesetInMainBranch), tfsPathBranchToCreate) };
-                else
-                {
-                    if (upperBound == 1)
-                    {
-                        throw new GitTfsException("An unexpected error occurred when trying to find the root changeset.\nFailed to find a previous changeset to changeset n°" + changesetIdsFirstChangesetInMainBranch + " in the branch!!!");
-                    }
-                    upperBound = Math.Max(upperBound - step, 1);
-                    lowerBound = Math.Max(upperBound - step, 1);
-                }
+                throw new GitTfsException("An unexpected error occurred when trying to find the root changeset.\nFailed to query history for " + tfsPathBranchToCreate);
             }
         }
 
@@ -598,11 +479,7 @@ namespace GitTfs.VsCommon
             public int TargetChangeset;
             public string TargetItem;
 
-            public override string ToString()
-            {
-                return string.Format("`{0}` C{1} `{2}` Source `{3}` C{4} `{5}`", TargetChangeType, TargetChangeset, TargetItem,
-                    SourceChangeType, SourceChangeset, SourceItem);
-            }
+            public override string ToString() => $"`{TargetChangeType}` C{TargetChangeset} `{TargetItem}` Source `{SourceChangeType}` C{SourceChangeset} `{SourceItem}`";
         }
 
         private IEnumerable<MergeInfo> GetMergeInfo(string tfsPathBranchToCreate, string tfsPathParentBranch,
@@ -614,6 +491,7 @@ namespace GitTfs.VsCommon
                     new ItemIdentifier(tfsPathBranchToCreate),
                     new ItemIdentifier[] { new ItemIdentifier(tfsPathParentBranch), },
                     null)
+                .Where(x => x.SourceChangeset?.ChangesetId != null)
                 .OrderByDescending(x => x.SourceChangeset.ChangesetId);
             MergeInfo lastMerge = null;
             foreach (var extendedMerge in merges)
@@ -644,19 +522,15 @@ namespace GitTfs.VsCommon
 
         protected ITfsChangeset BuildTfsChangeset(Changeset changeset, IGitTfsRemote remote)
         {
-            var tfsChangeset = _container.With<ITfsHelper>(this).With<IChangeset>(_bridge.Wrap<WrapperForChangeset, Changeset>(changeset)).GetInstance<TfsChangeset>();
-            tfsChangeset.Summary = new TfsChangesetInfo { ChangesetId = changeset.ChangesetId, Remote = remote };
+            var tfsChangesetInfo = new TfsChangesetInfo { ChangesetId = changeset.ChangesetId, Remote = remote };
+            ITfsChangeset tfsChangeset = new TfsChangeset(this, _bridge.Wrap<WrapperForChangeset, Changeset>(changeset), tfsChangesetInfo, _authorsFile);
 
-            if (HasWorkItems(changeset))
+            tfsChangeset.Summary.Workitems = changeset.AssociatedWorkItems.Select(wi => new TfsWorkitem
             {
-                tfsChangeset.Summary.Workitems = changeset.WorkItems.Select(wi => new TfsWorkitem
-                {
-                    Id = wi.Id,
-                    Title = wi.Title,
-                    Description = wi.Description,
-                    Url = Linking.GetArtifactUrl(wi.Uri.AbsoluteUri)
-                });
-            }
+                Id = wi.Id,
+                Title = wi.Title,
+                Url = HyperlinkService.GetWorkItemEditorUrl(wi.Id).ToString()
+            });
             tfsChangeset.Summary.CheckinNotes = changeset.CheckinNote.Values.Select(note => new TfsCheckinNote
             {
                 Name = note.Name,
@@ -665,26 +539,6 @@ namespace GitTfs.VsCommon
             tfsChangeset.Summary.PolicyOverrideComment = changeset.PolicyOverride.Comment;
 
             return tfsChangeset;
-        }
-
-        protected virtual bool HasWorkItems(Changeset changeset)
-        {
-            // This method wraps changeset.WorkItems, because
-            // changeset.WorkItems might result to ConnectionException: TF26175: Team Foundation Core Services attribute 'AttachmentServerUrl' not found.
-            // in this case assume that it is initialized to null
-            // NB: in VS2011 a new property appeared (AssociatedWorkItems), which works correctly
-            WorkItem[] result = null;
-            try
-            {
-                result = Retry.Do(() => changeset.WorkItems);
-            }
-            catch (ConnectionException exception)
-            {
-                if (!exception.Message.StartsWith("TF26175:"))
-                    throw;
-            }
-
-            return result != null && result.Length > 0;
         }
 
         private readonly Dictionary<string, Workspace> _workspaces = new Dictionary<string, Workspace>();
@@ -767,18 +621,12 @@ namespace GitTfs.VsCommon
                 workspace.CreateMapping(folder);
         }
 
-        private string GenerateWorkspaceName()
-        {
-            return "git-tfs-" + Guid.NewGuid();
-        }
+        private string GenerateWorkspaceName() => "git-tfs-" + Guid.NewGuid();
 
-        public int ShowCheckinDialog(IWorkspace workspace, IPendingChange[] pendingChanges, IEnumerable<IWorkItemCheckedInfo> checkedInfos, string checkinComment)
-        {
-            return ShowCheckinDialog(_bridge.Unwrap<Workspace>(workspace),
+        public int ShowCheckinDialog(IWorkspace workspace, IPendingChange[] pendingChanges, IEnumerable<IWorkItemCheckedInfo> checkedInfos, string checkinComment) => ShowCheckinDialog(_bridge.Unwrap<Workspace>(workspace),
                                      pendingChanges.Select(p => _bridge.Unwrap<PendingChange>(p)).ToArray(),
                                      checkedInfos.Select(c => _bridge.Unwrap<WorkItemCheckedInfo>(c)).ToArray(),
                                      checkinComment);
-        }
 
         private int ShowCheckinDialog(Workspace workspace, PendingChange[] pendingChanges,
             WorkItemCheckedInfo[] checkedInfos, string checkinComment)
@@ -800,15 +648,9 @@ namespace GitTfs.VsCommon
 
         protected const string DialogAssemblyName = "Microsoft.TeamFoundation.VersionControl.ControlAdapter";
 
-        private Type GetCheckinDialogType()
-        {
-            return GetDialogAssembly().GetType(DialogAssemblyName + ".CheckinDialog");
-        }
+        private Type GetCheckinDialogType() => GetDialogAssembly().GetType(DialogAssemblyName + ".CheckinDialog");
 
-        private Assembly GetDialogAssembly()
-        {
-            return Assembly.LoadFrom(GetDialogAssemblyPath());
-        }
+        private Assembly GetDialogAssembly() => Assembly.LoadFrom(GetDialogAssemblyPath());
 
         protected abstract string GetDialogAssemblyPath();
 
@@ -872,10 +714,7 @@ namespace GitTfs.VsCommon
             return matchingShelvesets != null && matchingShelvesets.Length > 0;
         }
 
-        protected string GetAuthenticatedUser()
-        {
-            return VersionControl.AuthorizedUser;
-        }
+        protected string GetAuthenticatedUser() => VersionControl.AuthorizedUser;
 
         public bool CanShowCheckinDialog
         {
@@ -911,9 +750,8 @@ namespace GitTfs.VsCommon
             }
             var wrapperForVersionControlServer =
                 _bridge.Wrap<WrapperForVersionControlServer, VersionControlServer>(VersionControl);
-            // TODO - containerify this (no `new`)!
             var fakeChangeset = new Unshelveable(shelveset, change, wrapperForVersionControlServer, _bridge);
-            var tfsChangeset = new TfsChangeset(remote.Tfs, fakeChangeset, null) { Summary = new TfsChangesetInfo { Remote = remote } };
+            var tfsChangeset = new TfsChangeset(remote.Tfs, fakeChangeset, new TfsChangesetInfo { Remote = remote }, _authorsFile);
             return tfsChangeset;
         }
 
@@ -1007,35 +845,17 @@ namespace GitTfs.VsCommon
                 _changes = _pendingSet.PendingChanges.Select(x => new UnshelveChange(x, _bridge, versionControlServer)).Cast<IChange>().ToArray();
             }
 
-            public IChange[] Changes
-            {
-                get { return _changes; }
-            }
+            public IChange[] Changes => _changes;
 
-            public string Committer
-            {
-                get { return _pendingSet.OwnerName; }
-            }
+            public string Committer => _pendingSet.OwnerName;
 
-            public DateTime CreationDate
-            {
-                get { return _shelveset.CreationDate; }
-            }
+            public DateTime CreationDate => _shelveset.CreationDate;
 
-            public string Comment
-            {
-                get { return _shelveset.Comment; }
-            }
+            public string Comment => _shelveset.Comment;
 
-            public int ChangesetId
-            {
-                get { return -1; }
-            }
+            public int ChangesetId => -1;
 
-            public IVersionControlServer VersionControlServer
-            {
-                get { return _versionControlServer; }
-            }
+            public IVersionControlServer VersionControlServer => _versionControlServer;
 
             public void Get(ITfsWorkspace workspace, IEnumerable<IChange> changes, Action<Exception> ignorableErrorHandler)
             {
@@ -1063,15 +883,9 @@ namespace GitTfs.VsCommon
                 _fakeItem = new UnshelveItem(_pendingChange, _bridge, versionControlServer);
             }
 
-            public TfsChangeType ChangeType
-            {
-                get { return _bridge.Convert<TfsChangeType>(_pendingChange.ChangeType); }
-            }
+            public TfsChangeType ChangeType => _bridge.Convert<TfsChangeType>(_pendingChange.ChangeType);
 
-            public IItem Item
-            {
-                get { return _fakeItem; }
-            }
+            public IItem Item => _fakeItem;
         }
 
         private class UnshelveItem : IItem
@@ -1088,41 +902,21 @@ namespace GitTfs.VsCommon
                 _versionControlServer = versionControlServer;
             }
 
-            public IVersionControlServer VersionControlServer
-            {
-                get { return _versionControlServer; }
-            }
+            public IVersionControlServer VersionControlServer => _versionControlServer;
 
-            public int ChangesetId
-            {
-                get
-                {
+            public int ChangesetId =>
                     // some operations like applying rename gets previous item state
                     // via looking at version of item minus 1. So will try to emulate
                     // that this shelve is real revision.
-                    return _pendingChange.Version + 1;
-                }
-            }
+                    _pendingChange.Version + 1;
 
-            public string ServerItem
-            {
-                get { return _pendingChange.ServerItem; }
-            }
+            public string ServerItem => _pendingChange.ServerItem;
 
-            public int DeletionId
-            {
-                get { return _pendingChange.DeletionId; }
-            }
+            public int DeletionId => _pendingChange.DeletionId;
 
-            public TfsItemType ItemType
-            {
-                get { return _bridge.Convert<TfsItemType>(_pendingChange.ItemType); }
-            }
+            public TfsItemType ItemType => _bridge.Convert<TfsItemType>(_pendingChange.ItemType);
 
-            public int ItemId
-            {
-                get { return _pendingChange.ItemId; }
-            }
+            public int ItemId => _pendingChange.ItemId;
 
             public long ContentLength
             {
@@ -1150,10 +944,7 @@ namespace GitTfs.VsCommon
                 return temp;
             }
 
-            public void Get(ITfsWorkspace workspace)
-            {
-                _pendingChange.DownloadShelvedFile(workspace.GetLocalItemForServerItem(_pendingChange.ServerItem));
-            }
+            public void Get(ITfsWorkspace workspace) => _pendingChange.DownloadShelvedFile(workspace.GetLocalItemForServerItem(_pendingChange.ServerItem));
         }
 
 #endregion
@@ -1176,39 +967,19 @@ namespace GitTfs.VsCommon
             return history.Single();
         }
 
-        public ITfsChangeset GetLatestChangeset(IGitTfsRemote remote)
-        {
-            return BuildTfsChangeset(GetLatestChangeset(remote, true), remote);
-        }
+        public ITfsChangeset GetLatestChangeset(IGitTfsRemote remote) => BuildTfsChangeset(GetLatestChangeset(remote, true), remote);
 
-        public int GetLatestChangesetId(IGitTfsRemote remote)
-        {
-            return GetLatestChangeset(remote, false).ChangesetId;
-        }
+        public int GetLatestChangesetId(IGitTfsRemote remote) => GetLatestChangeset(remote, false).ChangesetId;
 
-        public IChangeset GetChangeset(int changesetId)
-        {
-            return _bridge.Wrap<WrapperForChangeset, Changeset>(VersionControl.GetChangeset(changesetId));
-        }
+        public IChangeset GetChangeset(int changesetId) => _bridge.Wrap<WrapperForChangeset, Changeset>(VersionControl.GetChangeset(changesetId));
 
-        public ITfsChangeset GetChangeset(int changesetId, IGitTfsRemote remote)
-        {
-            return BuildTfsChangeset(VersionControl.GetChangeset(changesetId), remote);
-        }
+        public ITfsChangeset GetChangeset(int changesetId, IGitTfsRemote remote) => BuildTfsChangeset(VersionControl.GetChangeset(changesetId), remote);
 
-        public IEnumerable<IWorkItemCheckinInfo> GetWorkItemInfos(IEnumerable<string> workItems, TfsWorkItemCheckinAction checkinAction)
-        {
-            return
-                GetWorkItemInfosHelper<IWorkItemCheckinInfo, WrapperForWorkItemCheckinInfo, WorkItemCheckinInfo>(
+        public IEnumerable<IWorkItemCheckinInfo> GetWorkItemInfos(IEnumerable<string> workItems, TfsWorkItemCheckinAction checkinAction) => GetWorkItemInfosHelper<IWorkItemCheckinInfo, WrapperForWorkItemCheckinInfo, WorkItemCheckinInfo>(
                     workItems, checkinAction, GetWorkItemInfo);
-        }
 
-        public IEnumerable<IWorkItemCheckedInfo> GetWorkItemCheckedInfos(IEnumerable<string> workItems, TfsWorkItemCheckinAction checkinAction)
-        {
-            return
-                GetWorkItemInfosHelper<IWorkItemCheckedInfo, WrapperForWorkItemCheckedInfo, WorkItemCheckedInfo>(
+        public IEnumerable<IWorkItemCheckedInfo> GetWorkItemCheckedInfos(IEnumerable<string> workItems, TfsWorkItemCheckinAction checkinAction) => GetWorkItemInfosHelper<IWorkItemCheckedInfo, WrapperForWorkItemCheckedInfo, WorkItemCheckedInfo>(
                     workItems, checkinAction, GetWorkItemCheckedInfo);
-        }
 
         public ICheckinNote CreateCheckinNote(Dictionary<string, string> checkinNotes)
         {
@@ -1232,23 +1003,14 @@ namespace GitTfs.VsCommon
             TfsWorkItemCheckinAction checkinAction,
             Func<string, WorkItemCheckinAction, TInstance> func
             )
-            where TWrapper : class
-        {
-            return (from workItem in workItems
-                    select _bridge.Wrap<TWrapper, TInstance>(
-                        func(workItem, _bridge.Convert<WorkItemCheckinAction>(checkinAction))))
+            where TWrapper : class => (from workItem in workItems
+                                       select _bridge.Wrap<TWrapper, TInstance>(
+                                           func(workItem, _bridge.Convert<WorkItemCheckinAction>(checkinAction))))
                 .Cast<TInterface>();
-        }
 
-        private WorkItemCheckinInfo GetWorkItemInfo(string workItem, WorkItemCheckinAction checkinAction)
-        {
-            return new WorkItemCheckinInfo(WorkItems.GetWorkItem(Convert.ToInt32(workItem)), checkinAction);
-        }
+        private WorkItemCheckinInfo GetWorkItemInfo(string workItem, WorkItemCheckinAction checkinAction) => new WorkItemCheckinInfo(WorkItems.GetWorkItem(Convert.ToInt32(workItem)), checkinAction);
 
-        private static WorkItemCheckedInfo GetWorkItemCheckedInfo(string workitem, WorkItemCheckinAction checkinAction)
-        {
-            return new WorkItemCheckedInfo(Convert.ToInt32(workitem), true, checkinAction);
-        }
+        private static WorkItemCheckedInfo GetWorkItemCheckedInfo(string workitem, WorkItemCheckinAction checkinAction) => new WorkItemCheckedInfo(Convert.ToInt32(workitem), true, checkinAction);
 
         public IEnumerable<TfsLabel> GetLabels(string tfsPathBranch, string nameFilter = null)
         {
@@ -1353,30 +1115,18 @@ namespace GitTfs.VsCommon
             }
         }
 
-        public bool IsExistingInTfs(string path)
-        {
-            return VersionControl.ServerItemExists(path, VersionSpec.Latest, DeletedState.Any, ItemType.Any);
-        }
+        public bool IsExistingInTfs(string path) => VersionControl.ServerItemExists(path, VersionSpec.Latest, DeletedState.Any, ItemType.Any);
 
-        protected void ConvertFolderIntoBranch(string tfsRepositoryPath)
-        {
-            VersionControl.CreateBranchObject(new BranchProperties(new ItemIdentifier(tfsRepositoryPath)));
-        }
+        protected void ConvertFolderIntoBranch(string tfsRepositoryPath) => VersionControl.CreateBranchObject(new BranchProperties(new ItemIdentifier(tfsRepositoryPath)));
 
         /// <summary>
         /// Help the TFS client find checkin policy assemblies.
         /// </summary>
         protected abstract Assembly LoadFromVsFolder(object sender, ResolveEventArgs args);
 
-        protected string TryGetUserRegString(string path, string name)
-        {
-            return TryGetRegString(Registry.CurrentUser, path, name);
-        }
+        protected string TryGetUserRegString(string path, string name) => TryGetRegString(Registry.CurrentUser, path, name);
 
-        protected string TryGetRegString(string path, string name)
-        {
-            return TryGetRegString(Registry.LocalMachine, path, name);
-        }
+        protected string TryGetRegString(string path, string name) => TryGetRegString(Registry.LocalMachine, path, name);
 
         protected string TryGetRegString(RegistryKey registryKey, string path, string name)
         {
@@ -1409,10 +1159,7 @@ namespace GitTfs.VsCommon
         /// <param name="path">path in the registry tree</param>
         /// <param name="startOfName">start of the name of the key to find</param>
         /// <returns>the value corresponding to the key found</returns>
-        protected string TryGetUserRegStringStartingWithName(string path, string startOfName)
-        {
-            return TryGetRegStringStartingWithName(Registry.CurrentUser, path, startOfName);
-        }
+        protected string TryGetUserRegStringStartingWithName(string path, string startOfName) => TryGetRegStringStartingWithName(Registry.CurrentUser, path, startOfName);
 
         /// <summary>
         /// Try to get the value of a key beginning with the name 'startOfName'
@@ -1425,10 +1172,7 @@ namespace GitTfs.VsCommon
         /// <param name="path">path in the registry tree</param>
         /// <param name="startOfName">start of the name of the key to find</param>
         /// <returns>the value corresponding to the key found</returns>
-        protected string TryGetRegStringStartingWithName(string path, string startOfName)
-        {
-            return TryGetRegStringStartingWithName(Registry.LocalMachine, path, startOfName);
-        }
+        protected string TryGetRegStringStartingWithName(string path, string startOfName) => TryGetRegStringStartingWithName(Registry.LocalMachine, path, startOfName);
 
         protected string TryGetRegStringStartingWithName(RegistryKey registryKey, string path, string startOfName)
         {
@@ -1483,40 +1227,8 @@ namespace GitTfs.VsCommon
             }
         }
 
-        public void DeleteShelveset(IWorkspace workspace, string shelvesetName)
-        {
-            VersionControl.DeleteShelveset(shelvesetName, workspace.OwnerName);
-        }
+        public void DeleteShelveset(IWorkspace workspace, string shelvesetName) => VersionControl.DeleteShelveset(shelvesetName, workspace.OwnerName);
 
-        protected virtual IBuildDetail GetSpecificBuildFromQueuedBuild(IQueuedBuild queuedBuild, string shelvesetName)
-        {
-            return queuedBuild.Build;
-        }
-    }
-
-    public class ItemDownloadStrategy : IItemDownloadStrategy
-    {
-        private readonly TfsApiBridge _bridge;
-
-        public ItemDownloadStrategy(TfsApiBridge bridge)
-        {
-            _bridge = bridge;
-        }
-
-        public TemporaryFile DownloadFile(IItem item)
-        {
-            var temp = new TemporaryFile();
-            try
-            {
-                _bridge.Unwrap<Item>(item).DownloadFile(temp);
-                return temp;
-            }
-            catch (Exception)
-            {
-                Trace.WriteLine(string.Format("Something went wrong downloading \"{0}\" in changeset {1}", item.ServerItem, item.ChangesetId));
-                temp.Dispose();
-                throw;
-            }
-        }
+        protected virtual IBuildDetail GetSpecificBuildFromQueuedBuild(IQueuedBuild queuedBuild, string shelvesetName) => queuedBuild.Build;
     }
 }

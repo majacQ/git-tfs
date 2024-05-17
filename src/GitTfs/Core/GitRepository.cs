@@ -1,8 +1,4 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
 using System.Text.RegularExpressions;
 using StructureMap;
 using LibGit2Sharp;
@@ -58,33 +54,18 @@ namespace GitTfs.Core
                 _repository.Refs.Add(gitRefName, shaCommit, message, true);
         }
 
-        public static string ShortToLocalName(string branchName)
-        {
-            return "refs/heads/" + branchName;
-        }
+        public static string ShortToLocalName(string branchName) => "refs/heads/" + branchName;
 
-        public static string ShortToTfsRemoteName(string branchName)
-        {
-            return "refs/remotes/tfs/" + branchName;
-        }
+        public static string ShortToTfsRemoteName(string branchName) => "refs/remotes/tfs/" + branchName;
 
-        public string GitDir { get; set; }
-        public string WorkingCopyPath { get; set; }
-        public string WorkingCopySubdir { get; set; }
+        public string GitDir { get; }
 
-        protected override GitProcess Start(string[] command, Action<ProcessStartInfo> initialize)
-        {
-            return base.Start(command, initialize.And(SetUpPaths));
-        }
+        protected override GitProcess Start(string[] command, Action<ProcessStartInfo> initialize) => base.Start(command, initialize.And(SetUpPaths));
 
         private void SetUpPaths(ProcessStartInfo gitCommand)
         {
             if (GitDir != null)
                 gitCommand.EnvironmentVariables["GIT_DIR"] = GitDir;
-            if (WorkingCopyPath != null)
-                gitCommand.WorkingDirectory = WorkingCopyPath;
-            if (WorkingCopySubdir != null)
-                gitCommand.WorkingDirectory = Path.Combine(gitCommand.WorkingDirectory, WorkingCopySubdir);
         }
 
         public string GetConfig(string key)
@@ -93,10 +74,7 @@ namespace GitTfs.Core
             return entry == null ? null : entry.Value;
         }
 
-        public T GetConfig<T>(string key)
-        {
-            return GetConfig(key, default(T));
-        }
+        public T GetConfig<T>(string key) => GetConfig(key, default(T));
 
         public T GetConfig<T>(string key, T defaultValue)
         {
@@ -113,15 +91,9 @@ namespace GitTfs.Core
             }
         }
 
-        public void SetConfig(string key, string value)
-        {
-            _repository.Config.Set<string>(key, value, ConfigurationLevel.Local);
-        }
+        public void SetConfig(string key, string value) => _repository.Config.Set<string>(key, value, ConfigurationLevel.Local);
 
-        public void SetConfig(string key, bool value)
-        {
-            SetConfig(key, value.ToString().ToLower());
-        }
+        public void SetConfig(string key, bool value) => SetConfig(key, value.ToString().ToLower());
 
 
         public IEnumerable<IGitTfsRemote> ReadAllTfsRemotes()
@@ -170,25 +142,10 @@ namespace GitTfs.Core
         }
 
         private IDictionary<string, IGitTfsRemote> GetTfsRemotes()
+            => _cachedRemotes ?? (_cachedRemotes = ReadTfsRemotes());
+
+        public IGitTfsRemote CreateTfsRemote(RemoteInfo remote)
         {
-            return _cachedRemotes ?? (_cachedRemotes = ReadTfsRemotes());
-        }
-
-        public IGitTfsRemote CreateTfsRemote(RemoteInfo remote, string autocrlf = null, string ignorecase = null)
-        {
-            if (HasRemote(remote.Id))
-                throw new GitTfsException("A remote with id \"" + remote.Id + "\" already exists.");
-
-            // The autocrlf default (as indicated by a null) is false and is set to override the system-wide setting.
-            // When creating branches we use the empty string to indicate that we do not want to set the value at all.
-            if (autocrlf == null)
-                autocrlf = "false";
-            if (autocrlf != string.Empty)
-                _repository.Config.Set("core.autocrlf", autocrlf);
-
-            if (ignorecase != null)
-                _repository.Config.Set("core.ignorecase", ignorecase);
-
             foreach (var entry in _remoteConfigReader.Dump(remote))
             {
                 if (entry.Value != null)
@@ -206,6 +163,7 @@ namespace GitTfs.Core
 
             return _cachedRemotes[remote.Id] = gitTfsRemote;
         }
+
 
         public void DeleteTfsRemote(IGitTfsRemote remote)
         {
@@ -234,11 +192,11 @@ namespace GitTfs.Core
                 throw new GitTfsException("error: the new name of the remote is invalid!");
 
             if (HasRemote(newRemoteName))
-                throw new GitTfsException(string.Format("error: this remote name \"{0}\" is already used!", newRemoteName));
+                throw new GitTfsException($"error: this remote name \"{newRemoteName}\" is already used!");
 
             var oldRemote = ReadTfsRemote(oldRemoteName);
             if (oldRemote == null)
-                throw new GitTfsException(string.Format("error: the remote \"{0}\" doesn't exist!", oldRemoteName));
+                throw new GitTfsException($"error: the remote \"{oldRemoteName}\" doesn't exist!");
 
             var remoteInfo = oldRemote.RemoteInfo;
             remoteInfo.Id = newRemoteName;
@@ -254,10 +212,7 @@ namespace GitTfs.Core
         {
             var branch = _repository.Branches[oldName];
 
-            if (branch == null)
-                return null;
-
-            return _repository.Branches.Rename(branch, newName);
+            return branch == null ? null : _repository.Branches.Rename(branch, newName);
         }
 
         private IDictionary<string, IGitTfsRemote> ReadTfsRemotes()
@@ -278,14 +233,9 @@ namespace GitTfs.Core
         }
 
         private IGitTfsRemote BuildRemote(RemoteInfo remoteInfo)
-        {
-            return _container.With(remoteInfo).With<IGitRepository>(this).GetInstance<IGitTfsRemote>();
-        }
+            => _container.With(remoteInfo).With<IGitRepository>(this).GetInstance<IGitTfsRemote>();
 
-        public bool HasRemote(string remoteId)
-        {
-            return GetTfsRemotes().ContainsKey(remoteId);
-        }
+        public bool HasRemote(string remoteId) => GetTfsRemotes().ContainsKey(remoteId);
 
         public bool IsInSameTeamProjectAsDefaultRepository(string tfsRepositoryPath)
         {
@@ -301,15 +251,9 @@ namespace GitTfs.Core
             return tfsRepositoryPath.StartsWith(teamProjectPath + "/");
         }
 
-        public bool HasRef(string gitRef)
-        {
-            return _repository.Refs[gitRef] != null;
-        }
+        public bool HasRef(string gitRef) => _repository.Refs[gitRef] != null;
 
-        public void MoveTfsRefForwardIfNeeded(IGitTfsRemote remote)
-        {
-            MoveTfsRefForwardIfNeeded(remote, "HEAD");
-        }
+        public void MoveTfsRefForwardIfNeeded(IGitTfsRemote remote) => MoveTfsRefForwardIfNeeded(remote, "HEAD");
 
         public void MoveTfsRefForwardIfNeeded(IGitTfsRemote remote, string @ref)
         {
@@ -337,13 +281,21 @@ namespace GitTfs.Core
             var commit = _repository.Lookup<Commit>(commitish);
             if (commit == null)
                 throw new GitTfsException("error: commit '" + commitish + "' can't be found and merged into!");
-            return _repository.Merge(commit, _repository.Config.BuildSignature(new DateTimeOffset(DateTime.Now)));
+
+            var options = new MergeOptions
+            {
+                OnCheckoutNotify = (file, reason) =>
+                {
+                    if (reason == CheckoutNotifyFlags.Conflict)
+                        Trace.TraceError("conflict found: " + file);
+                    return true;
+                },
+                CheckoutNotifyFlags = CheckoutNotifyFlags.Conflict
+            };
+            return _repository.Merge(commit, _repository.Config.BuildSignature(new DateTimeOffset(DateTime.Now)), options);
         }
 
-        public String GetCurrentCommit()
-        {
-            return _repository.Head.Commits.First().Sha;
-        }
+        public String GetCurrentCommit() => _repository.Head.Commits.First().Sha;
 
         public IEnumerable<TfsChangesetInfo> GetLastParentTfsCommits(string head)
         {
@@ -425,9 +377,7 @@ namespace GitTfs.Core
         }
 
         public IDictionary<string, GitObject> CreateObjectsDictionary()
-        {
-            return new Dictionary<string, GitObject>(StringComparer.InvariantCultureIgnoreCase);
-        }
+            => new Dictionary<string, GitObject>(StringComparer.InvariantCultureIgnoreCase);
 
         public IDictionary<string, GitObject> GetObjects(string commit, IDictionary<string, GitObject> entries)
         {
@@ -445,16 +395,9 @@ namespace GitTfs.Core
         }
 
         public IGitTreeBuilder GetTreeBuilder(string commit)
-        {
-            if (commit == null)
-            {
-                return new GitTreeBuilder(_repository.ObjectDatabase);
-            }
-            else
-            {
-                return new GitTreeBuilder(_repository.ObjectDatabase, _repository.Lookup<Commit>(commit).Tree);
-            }
-        }
+            => commit == null
+                ? new GitTreeBuilder(_repository.ObjectDatabase)
+                : new GitTreeBuilder(_repository.ObjectDatabase, _repository.Lookup<Commit>(commit).Tree);
 
         public string GetCommitMessage(string head, string parentCommitish)
         {
@@ -470,12 +413,9 @@ namespace GitTfs.Core
             return GitTfsConstants.TfsCommitInfoRegex.Replace(message.ToString(), "").Trim(' ', '\r', '\n');
         }
 
-        private static string NormalizeLineEndings(string input)
-        {
-            return string.IsNullOrEmpty(input)
+        private static string NormalizeLineEndings(string input) => string.IsNullOrEmpty(input)
                 ? input
                 : input.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
-        }
 
         private void ParseEntries(IDictionary<string, GitObject> entries, Tree treeInfo, string commit)
         {
@@ -514,10 +454,7 @@ namespace GitTfs.Core
             }
         }
 
-        private IGitChangedFile BuildGitChangedFile(GitChangeInfo change)
-        {
-            return change.ToGitChangedFile(_container.With((IGitRepository)this));
-        }
+        private IGitChangedFile BuildGitChangedFile(GitChangeInfo change) => change.ToGitChangedFile(_container.With((IGitRepository)this));
 
         public bool WorkingCopyHasUnstagedOrUncommitedChanges
         {
@@ -693,12 +630,9 @@ namespace GitTfs.Core
             _repository.Notes.Add(new ObjectId(sha), content, author, author, "commits");
         }
 
-        public void ResetHard(string sha)
-        {
-            _repository.Reset(ResetMode.Hard, sha);
-        }
+        public void ResetHard(string sha) => _repository.Reset(ResetMode.Hard, sha);
 
-        public bool IsBare { get { return _repository.Info.IsBare; } }
+        public bool IsBare => _repository.Info.IsBare;
 
         /// <summary>
         /// Gets all configured "subtree" remotes which point to the same Tfs URL as the given remote.
@@ -713,15 +647,9 @@ namespace GitTfs.Core
             return ReadAllTfsRemotes().Where(x => x.IsSubtree && string.Equals(x.OwningRemoteId, owner.Id, StringComparison.InvariantCultureIgnoreCase));
         }
 
-        public void ResetRemote(IGitTfsRemote remoteToReset, string target)
-        {
-            _repository.Refs.UpdateTarget(remoteToReset.RemoteRef, target);
-        }
+        public void ResetRemote(IGitTfsRemote remoteToReset, string target) => _repository.Refs.UpdateTarget(remoteToReset.RemoteRef, target);
 
-        public string GetCurrentBranch()
-        {
-            return _repository.Head.CanonicalName;
-        }
+        public string GetCurrentBranch() => _repository.Head.CanonicalName;
 
         public void GarbageCollect(bool auto, string additionalMessage)
         {
@@ -769,10 +697,7 @@ namespace GitTfs.Core
             return commits;
         }
 
-        public bool IsPathIgnored(string relativePath)
-        {
-            return _repository.Ignore.IsPathIgnored(relativePath);
-        }
+        public bool IsPathIgnored(string relativePath) => _repository.Ignore.IsPathIgnored(relativePath);
 
         public string CommitGitIgnore(string pathToGitIgnoreFile)
         {
@@ -787,18 +712,22 @@ namespace GitTfs.Core
             var sha = _repository.ObjectDatabase.CreateCommit(signature, signature, ".gitignore", tree, new Commit[0], false).Sha;
             Trace.WriteLine(".gitignore commit created: " + sha);
 
-            _repository.Refs.Add(ShortToTfsRemoteName("default"), new ObjectId(sha));
-            _repository.Refs.Add(ShortToLocalName("master"), new ObjectId(sha));
+            // Point our tfs remote branch to the .gitignore commit
+            var defaultRef = ShortToTfsRemoteName("default");
+            _repository.Refs.Add(defaultRef, new ObjectId(sha));
+
+            // Also point HEAD to the .gitignore commit, if it isn't already. This
+            // ensures a common initial commit for the git-tfs init --gitignore case.
+            if (_repository.Head.CanonicalName != defaultRef)
+                _repository.Refs.Add(_repository.Head.CanonicalName, new ObjectId(sha));
 
             return sha;
         }
 
-        public void UseGitIgnore(string pathToGitIgnoreFile)
-        {
+        public void UseGitIgnore(string pathToGitIgnoreFile) =>
             //Should add ourself the rules to the temporary rules because committing directly to the git database
             //prevent libgit2sharp to detect the new .gitignore file
             _repository.Ignore.AddTemporaryRules(File.ReadLines(pathToGitIgnoreFile));
-        }
 
         public IDictionary<int, string> GetCommitChangeSetPairs()
         {
@@ -809,7 +738,10 @@ namespace GitTfs.Core
                 int changesetId;
                 if (TryParseChangesetId(c.Message, out changesetId))
                 {
-                    pairs.Add(changesetId, c.Sha);
+                    if (pairs.TryGetValue(changesetId, out var commitSha))
+                        Trace.TraceWarning("warning: Git commit {0} couldn't be assigned to TFS changeset '{1}' as git commit '{2}' was assigned already. Please correct the export file accordingly if needed", c.Sha, changesetId, commitSha);
+                    else
+                        pairs.Add(changesetId, c.Sha);
                 }
                 else
                 {

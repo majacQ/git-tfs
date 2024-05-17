@@ -16,6 +16,7 @@ a TFS source tree and fetch all the changesets
 								   default: default
 		  --template=VALUE       Passed to git-init
 		  --shared[=VALUE]       Passed to git-init
+		  --initial-branch=VALUE Passed to git-init (requires Git >= 2.28.0)
 		  --autocrlf=VALUE       Normalize line endings (default: false)
 		  --ignorecase=VALUE     Ignore case in file paths (default: system default)
 		  --bare                 clone the TFS repository in a bare git repository
@@ -63,9 +64,18 @@ didn't work when the clone was done on a network share.
 ## Examples
 ### Simple
 To clone all of `$/Project1` from your TFS server `tfs`
-into a new directory `Project1`, do this:
+into a new directory `Project1`, do this in cmd or powershell:
 
     git tfs clone http://tfs:8080/tfs/DefaultCollection $/Project1
+
+In a git bash, run this command instead
+
+    MSYS_NO_PATHCONV=1 git tfs clone http://tfs:8080/tfs/DefaultCollection $/Project1
+
+Setting the environment `MSYS_NO_PATHCONV=1` prevents that the POSIX-to-Windows path conversion
+will kick in, trying to convert `$/Project1` to a file system path. For further information
+see the [Known Issues](https://github.com/git-for-windows/build-extra/blob/49063144d88bf3fdd35e53eceb8cb973ecb3163c/ReleaseNotes.md#known-issues)
+in the release notes of Git.
 
 Note: Equivalent to cloning with dependency branches (with option `--branches=auto`) if you are cloning the trunk branch.
 
@@ -185,10 +195,21 @@ You could download a `.gitignore` file for your language or project from the [gi
 
 ### Authentication
 
-If the TFS server need an authentication, you could use the _--username_ and _--password_ parameters. If you don't specify theses informations, you will be prompted to enter them. If you use these parameters, the informations, git-tfs will store these informations (in the .git/config file --in clear--) and never prompt you again. If you don't want your password to be saved, don't use these options.
+#### Using credentials
+
+If the TFS server need an authentication, you could use the _--username_ and _--password_ parameters. If you don't specify these informations, you will be prompted to enter them. If you use these parameters, the informations, git-tfs will store these informations (in the .git/config file --in clear--) and never prompt you again. If you don't want your password to be saved, don't use these options.
 
     git tfs clone http://tfs:8080/tfs/DefaultCollection $/Project1 -u=DISSRVTFS03\peter.pan -p=wendy
 
+#### Using a PAT (Personal Access Token)
+
+By default, git-tfs will attempt to use current user Windows credentials, or cached user credentials in the case of connecting to Azure DevOps or remote TFS server. Connecting to an Azure DevOps organization may prompt you to login to your organization, which may also include additional multi-factor/2FA authentication steps.
+
+In some scenarios, such as bulk operations or automated scripting scenarios (like in a pipeline task), you may wish to bypass this user interactive dialog. To do so, you may leverage a Personal Access Token (PAT) from Azure DevOps stored in your local machines environment variables, named as `GIT_TFS_PAT`. You can easily set this environment variable via command-line:
+```
+setx GIT_TFS_PAT insert_pat_here
+```
+After setting this environment variable, all interactions to a TFS server/Azure DevOps will use this PAT for authentication. No user credentials will be used, nor offered. In order to return to normal user interactive logins, delete this environment variable.
 
 ### Map TFS users to git users
 

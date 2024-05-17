@@ -1,4 +1,3 @@
-using System;
 using NDesk.Options;
 using GitTfs.Util;
 
@@ -11,16 +10,14 @@ namespace GitTfs.Commands
 
         public InitOptions() { GitInitAutoCrlf = DefaultAutocrlf; }
 
-        public OptionSet OptionSet
-        {
-            get
-            {
-                return new OptionSet
+        public OptionSet OptionSet => new OptionSet
                 {
                     { "template=", "Passed to git-init",
                         v => GitInitTemplate = v },
                     { "shared:", "Passed to git-init",
                         v => GitInitShared = v == null ? (object)true : (object)v },
+                    { "initial-branch=", "Passed to git-init (requires Git >= 2.28.0)",
+                        v => GitInitDefaultBranch = v },
                     { "autocrlf=", "Normalize line endings (default: " + DefaultAutocrlf + ")",
                         v => GitInitAutoCrlf = ValidateCrlfValue(v) },
                     { "ignorecase=", "Ignore case in file paths (default: system default)",
@@ -28,8 +25,6 @@ namespace GitTfs.Commands
                     {"bare", "Clone the TFS repository in a bare git repository", v => IsBare = v != null},
                     {"workspace=", "Set tfs workspace to a specific folder (a shorter path is better!)", v => WorkspacePath = v},
                 };
-            }
-        }
 
         private string ValidateCrlfValue(string v)
         {
@@ -52,6 +47,7 @@ namespace GitTfs.Commands
         public string WorkspacePath { get; set; }
         public string GitInitTemplate { get; set; }
         public object GitInitShared { get; set; }
+        public string GitInitDefaultBranch { get; set; }
         public string GitInitAutoCrlf { get; set; }
         public string GitInitIgnoreCase { get; set; }
     }

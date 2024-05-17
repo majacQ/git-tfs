@@ -56,10 +56,10 @@ You need .NET 4.6.2 and the 2012 or 2013 version of Team Explorer installed (or 
     git tfs list-remote-branches http://tfs:8080/tfs/DefaultCollection
 
     # clone the whole repository (wait for a while...) :
-    git tfs clone http://tfs:8080/tfs/DefaultCollection $/some_project
+    git tfs clone http://tfs:8080/tfs/DefaultCollection $/some_project <dist_folder_where_to_clone>
 
     # or, if you're impatient (and want to work from the last changeset) :
-    git tfs quick-clone http://tfs:8080/tfs/DefaultCollection $/some_project
+    git tfs quick-clone http://tfs:8080/tfs/DefaultCollection $/some_project <dist_folder_where_to_clone>
 
     # or, if you're impatient (and want a specific changeset) :
     git tfs quick-clone http://tfs:8080/tfs/DefaultCollection $/some_project -c=145
@@ -154,6 +154,7 @@ This is the complete list of commands in the master branch on github.
 * diagnostics (for git-tfs developers only) - since 0.9
 
 * [config file](doc/config.md)
+* For authentification with user credentials or using a PAT, [clone](doc/commands/clone.md#Authentication) command.
 
 ## Building
 
@@ -190,7 +191,6 @@ Please, read our short and simple [guidelines](CONTRIBUTING.md) and our doc on h
 Especially, don't forget:
 
 * to run the build task `.\build.ps1 -Target "FormatCode"` before committing (to keep code formatting consistent, and pull request easier to review)
-* to set `core.autocrlf` to `true` (`git config core.autocrlf true`)
 * to indent your code using 4 spaces (even if `.editorconfig` should take care of that).
 
 ## Migrations

@@ -1,8 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
+
 using GitTfs.Core.TfsInterop;
 using GitTfs.Util;
 
@@ -13,14 +10,15 @@ namespace GitTfs.Core
         private readonly ITfsHelper _tfs;
         private readonly IChangeset _changeset;
         private readonly AuthorsFile _authors;
-        public TfsChangesetInfo Summary { get; set; }
-        public int BaseChangesetId { get; set; }
+        public TfsChangesetInfo Summary { get; }
+        public int BaseChangesetId { get; }
 
-        public TfsChangeset(ITfsHelper tfs, IChangeset changeset, AuthorsFile authors)
+        public TfsChangeset(ITfsHelper tfs, IChangeset changeset, TfsChangesetInfo tfsChangesetInfo, AuthorsFile authors)
         {
             _tfs = tfs;
             _changeset = changeset;
             _authors = authors;
+            Summary = tfsChangesetInfo;
             BaseChangesetId = _changeset.Changes.Max(c => c.Item.ChangesetId) - 1;
         }
 
@@ -77,25 +75,13 @@ namespace GitTfs.Core
             }
         }
 
-        private void Ignore(string pathInGitRepo)
-        {
-            Trace.TraceInformation(string.Format("C{0} ! No changes applied to '{1}', file ignored", _changeset.ChangesetId, pathInGitRepo));
-        }
+        private void Ignore(string pathInGitRepo) => Trace.TraceInformation($"C{_changeset.ChangesetId} ! No changes applied to '{pathInGitRepo}', file ignored");
 
-        public IEnumerable<TfsTreeEntry> GetTree()
-        {
-            return GetFullTree().Where(item => item.Item.ItemType == TfsItemType.File && !Summary.Remote.ShouldSkip(item.FullName));
-        }
+        public IEnumerable<TfsTreeEntry> GetTree() => GetFullTree().Where(item => item.Item.ItemType == TfsItemType.File && !Summary.Remote.ShouldSkip(item.FullName));
 
-        public bool IsMergeChangeset
-        {
-            get
-            {
-                if (_changeset == null || _changeset.Changes == null || !_changeset.Changes.Any())
-                    return false;
-                return _changeset.Changes.Any(c => c.ChangeType.IncludesOneOf(TfsChangeType.Merge));
-            }
-        }
+        public bool IsMergeChangeset => _changeset == null || _changeset.Changes == null || !_changeset.Changes.Any()
+                    ? false
+                    : _changeset.Changes.Any(c => c.ChangeType.IncludesOneOf(TfsChangeType.Merge));
 
         public IEnumerable<TfsTreeEntry> GetFullTree()
         {
@@ -169,10 +155,7 @@ namespace GitTfs.Core
             return string.IsNullOrEmpty(Summary.Remote.TfsRepositoryPath) ? "" : Summary.Remote.Prefix;
         }
 
-        private LogEntry MakeNewLogEntry()
-        {
-            return MakeNewLogEntry(_changeset, Summary.Remote);
-        }
+        private LogEntry MakeNewLogEntry() => MakeNewLogEntry(_changeset, Summary.Remote);
 
         private LogEntry MakeNewLogEntry(IChangeset changesetToLog, IGitTfsRemote remote = null)
         {
@@ -186,7 +169,8 @@ namespace GitTfs.Core
             }
             var name = changesetToLog.Committer;
             var email = changesetToLog.Committer;
-            if (_authors != null && _authors.Authors.ContainsKey(changesetToLog.Committer))
+            bool foundInAuthorFile = _authors?.Authors?.ContainsKey(changesetToLog.Committer) ?? false;
+            if (foundInAuthorFile)
             {
                 name = _authors.Authors[changesetToLog.Committer].Name;
                 email = _authors.Authors[changesetToLog.Committer].Email;
@@ -208,10 +192,9 @@ namespace GitTfs.Core
                 if (split.Length == 2)
                 {
                     name = split[1].ToLower();
-                    email = string.Format("{0}@{1}.tfs.local", name, split[0].ToLower());
+                    email = $"{name}@{split[0].ToLower()}.tfs.local";
                 }
             }
-
             // committer's & author's name and email MUST NOT be empty as otherwise they would be picked
             // by git from user.name and user.email config settings which is bad thing because commit could
             // be different depending on whose machine it fetched
@@ -222,6 +205,16 @@ namespace GitTfs.Core
             if (string.IsNullOrWhiteSpace(email))
             {
                 email = "unknown@tfs.local";
+            }
+            if (!foundInAuthorFile)
+            {
+                string lookup = $"{name} <{email}>";
+                foundInAuthorFile = _authors?.Authors?.ContainsKey(lookup) ?? false;
+                if (foundInAuthorFile)
+                {
+                    name = _authors.Authors[lookup].Name;
+                    email = _authors.Authors[lookup].Email;
+                }
             }
             if (remote == null)
                 remote = Summary.Remote;

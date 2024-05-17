@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Linq;
 using NDesk.Options;
 using StructureMap;
 using GitTfs.Core;
@@ -21,13 +20,7 @@ namespace GitTfs.Commands
             _remoteOptions = remoteOptions;
         }
 
-        public OptionSet OptionSet
-        {
-            get
-            {
-                return _remoteOptions.OptionSet;
-            }
-        }
+        public OptionSet OptionSet => _remoteOptions.OptionSet;
 
         public int Run(string tfsUrl)
         {
@@ -35,11 +28,6 @@ namespace GitTfs.Commands
             _tfsHelper.Username = _remoteOptions.Username;
             _tfsHelper.Password = _remoteOptions.Password;
             _tfsHelper.EnsureAuthenticated();
-
-            if (!_tfsHelper.CanGetBranchInformation)
-            {
-                throw new GitTfsException("error: this version of TFS doesn't support this functionality");
-            }
 
             string convertBranchMessage = "  -> Open 'Source Control Explorer' and for each folder corresponding to a branch, right click on the folder and select 'Branching and Merging' > 'Convert to branch'.";
             var branches = _tfsHelper.GetBranches().Where(b => b.IsRoot).ToList();

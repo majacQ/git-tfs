@@ -1,8 +1,4 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
 using StructureMap;
 using GitTfs.Commands;
 using GitTfs.Core;
@@ -44,7 +40,7 @@ namespace GitTfs
             UpdateLoggerOnDebugging();
             Trace.WriteLine("Command run:" + _globals.CommandLineRun);
             if (RequiresValidGitRepository(command)) AssertValidGitRepository();
-            bool willCreateRepository = command.GetType() == typeof(Clone) || command.GetType() == typeof(Init);
+            bool willCreateRepository = command.GetType() == typeof(Clone) || command.GetType() == typeof(QuickClone) || command.GetType() == typeof(Init);
             ParseAuthorsAndSave(!willCreateRepository);
             var exitCode = Main(command, unparsedArgs);
             if (willCreateRepository)
@@ -88,10 +84,7 @@ namespace GitTfs
             }
         }
 
-        public bool RequiresValidGitRepository(GitTfsCommand command)
-        {
-            return !command.GetType().GetCustomAttributes(typeof(RequiresValidGitRepositoryAttribute), false).IsEmpty();
-        }
+        public bool RequiresValidGitRepository(GitTfsCommand command) => !command.GetType().GetCustomAttributes(typeof(RequiresValidGitRepositoryAttribute), false).IsEmpty();
 
         private void ParseAuthorsAndSave(bool couldSaveAuthorFile)
         {
@@ -111,15 +104,6 @@ namespace GitTfs
 
         public void InitializeGlobals()
         {
-            var git = _container.GetInstance<IGitHelpers>();
-            try
-            {
-                _globals.StartingRepositorySubDir = git.CommandOneline("rev-parse", "--show-prefix");
-            }
-            catch (Exception)
-            {
-                _globals.StartingRepositorySubDir = "";
-            }
             if (_globals.GitDir != null)
             {
                 _globals.GitDirSetByUser = true;
@@ -178,9 +162,6 @@ namespace GitTfs
             return _container.GetInstance<Help>();
         }
 
-        public IList<string> ParseOptions(GitTfsCommand command, IList<string> args)
-        {
-            return command.GetAllOptions(_container).Parse(args);
-        }
+        public IList<string> ParseOptions(GitTfsCommand command, IList<string> args) => command.GetAllOptions(_container).Parse(args);
     }
 }

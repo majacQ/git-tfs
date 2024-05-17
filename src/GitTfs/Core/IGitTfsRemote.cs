@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using GitTfs.Core.TfsInterop;
 using GitTfs.Commands;
 
@@ -30,22 +28,21 @@ namespace GitTfs.Core
     {
         bool IsDerived { get; }
         RemoteInfo RemoteInfo { get; }
-        string Id { get; set; }
-        string TfsUrl { get; set; }
-        string TfsRepositoryPath { get; set; }
+        string Id { get; }
+        string TfsUrl { get; }
+        string TfsRepositoryPath { get; }
         /// <summary>
         /// Gets the TFS server-side paths of all subtrees of this remote.
         /// Valid if the remote has subtrees, which occurs when <see cref="TfsRepositoryPath"/> is null.
         /// </summary>
         string[] TfsSubtreePaths { get; }
-        string IgnoreRegexExpression { get; set; }
-        string IgnoreExceptRegexExpression { get; set; }
-        string GitIgnorePath { get; set; }
-        bool Autotag { get; set; }
+        string IgnoreRegexExpression { get; }
+        string IgnoreExceptRegexExpression { get; }
+        bool Autotag { get; }
         string TfsUsername { get; set; }
         string TfsPassword { get; set; }
-        IGitRepository Repository { get; set; }
-        ITfsHelper Tfs { get; set; }
+        IGitRepository Repository { get; }
+        ITfsHelper Tfs { get; }
         int MaxChangesetId { get; set; }
         string MaxCommitHash { get; set; }
         string RemoteRef { get; }
@@ -86,9 +83,6 @@ namespace GitTfs.Core
 
     public static class IGitTfsRemoteExt
     {
-        public static IFetchResult FetchWithMerge(this IGitTfsRemote remote, int mergeChangesetId, bool stopOnFailMergeCommit = false, params string[] parentCommitsHashes)
-        {
-            return remote.FetchWithMerge(mergeChangesetId, stopOnFailMergeCommit, null, parentCommitsHashes);
-        }
+        public static IFetchResult FetchWithMerge(this IGitTfsRemote remote, int mergeChangesetId, bool stopOnFailMergeCommit = false, params string[] parentCommitsHashes) => remote.FetchWithMerge(mergeChangesetId, stopOnFailMergeCommit, null, parentCommitsHashes);
     }
 }

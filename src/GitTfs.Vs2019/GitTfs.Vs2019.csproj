@@ -1,11 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net472</TargetFramework>
-    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <PlatformTarget>AnyCPU</PlatformTarget>
-  </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\CommonAssemblyInfo.cs">
       <Link>Properties\CommonAssemblyInfo.cs</Link>
@@ -40,8 +34,8 @@
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="xcopy /y /I &quot;$(TargetDir)*.dll&quot; &quot;$(SolutionDir)GitTfs\$(OutDir)$(ProjectName)&quot; /EXCLUDE:$(SolutionDir)build\files_to_ignore_during_post_build_copy.txt" />
-    <Exec Command="xcopy /y /I &quot;$(TargetDir)*.pdb&quot; &quot;$(SolutionDir)GitTfs\$(OutDir)$(ProjectName)&quot; /EXCLUDE:$(SolutionDir)build\files_to_ignore_during_post_build_copy.txt" />
+    <Exec Command="xcopy /y /I &quot;$(TargetDir)*.dll&quot; &quot;$(SolutionDir)GitTfs\$(OutDir)$(ProjectName)&quot; /EXCLUDE:..\build\files_to_ignore_during_post_build_copy.txt" />
+    <Exec Command="xcopy /y /I &quot;$(TargetDir)*.pdb&quot; &quot;$(SolutionDir)GitTfs\$(OutDir)$(ProjectName)&quot; /EXCLUDE:..\build\files_to_ignore_during_post_build_copy.txt" />
   </Target>
   <Import Project="..\.paket\Paket.Restore.targets" />
 </Project>
